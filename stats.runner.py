@@ -335,7 +335,7 @@ def main():
             print("\n[FDR]\n", res)
             to_excel_append(writer, res, "fdr")
 
-    print(f"\n✅ Results saved to: {outpath}")
+    print(f"\n Results saved to: {outpath}")
 
 
 if __name__ == "__main__":
