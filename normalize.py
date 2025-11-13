@@ -29,6 +29,11 @@ def normalize_any(
         # guess regex pattern (ex. guess_15)
         r"(?i)^(?P<instrument>guess)_(?P<item>\d+)$",
         r"(?i)^(?P<instrument>guess)_(?P<item>15)[ _-]*rev$",
+
+        # --- NEW: generic instrument pattern ---
+        # Handles things like: epds_1, xyz_total_3, etc.
+        # Requirement: the name must contain at least one digit (so "Age" won't match).
+        r"(?i)(?=.*\d)^(?P<instrument>[a-z0-9]+)(?:_(?P<subscale>[a-z]+))?[ _-]*(?P<item>\d+)?$",
     ),
     carry_extra_as_covariates=True,  # carry extra covariates
     drop_ids=True
@@ -39,7 +44,6 @@ def normalize_any(
     df.columns = [str(c).strip() for c in df.columns]
     cols = list(df.columns)  # gather all columns
 
-    cols = list(df.columns)
     # keep provided id_cols that exist
     id_cols = [c for c in id_cols if c in cols]
     # also auto-add any column that looks like a participant id
@@ -50,14 +54,16 @@ def normalize_any(
             id_cols.append(c)
 
     frames = []  # create list for frames
-    matched_cols = set()  # create. alist for matched columns
+    matched_cols = set()  # track matched columns
 
     for pat in families:  # search for patterns in families and store in variable rx
         rx = re.compile(pat)
 
         # exclude ID columns from regex matching
         remain = [
-            c for c in cols if c not in matched_cols and c not in id_cols and not _is_participant_id(c)]
+            c for c in cols
+            if c not in matched_cols and c not in id_cols and not _is_participant_id(c)
+        ]
 
         matches = [(c, rx.match(str(c))) for c in remain]
         matches = [(c, m) for (c, m) in matches if m]
@@ -85,7 +91,8 @@ def normalize_any(
 
     if not frames:
         raise ValueError(
-            "No columns matched any family. Adjust regex or headers.")
+            "No columns matched any family. Adjust regex or headers."
+        )
 
     tidy = pd.concat(frames, ignore_index=True)
 
@@ -113,8 +120,10 @@ def normalize_any(
     tidy = tidy.dropna(subset=["value"])
 
     # Carry through covariates
-    extra_cols = [c for c in cols if c not in set(
-        id_cols) | matched_cols and not _is_participant_id(c)]
+    extra_cols = [
+        c for c in cols
+        if c not in set(id_cols) | matched_cols and not _is_participant_id(c)
+    ]
     if carry_extra_as_covariates and extra_cols:
         tidy = tidy.merge(df[id_cols + extra_cols],
                           on=list(id_cols), how="left")
@@ -132,6 +141,7 @@ def normalize_any(
         return str(v)
 
     def _label(row):
+        # Trials first
         trial_id = _safe_get(row, "trial_id").strip()
         if trial_id:
             pr = _safe_get(row, "prefix").strip()
@@ -144,6 +154,7 @@ def normalize_any(
         sub = _safe_get(row, "subscale").strip()
         item = _safe_get(row, "item").strip()
 
+        # SPGQ: use nice subscale names already mapped above
         if inst == "spgq":
             if sub and item:
                 return f"{inst}_{sub}_{item}"
@@ -151,13 +162,25 @@ def normalize_any(
                 return f"{inst}_{sub}"
             return inst or "measure"
 
+        # GUESS: keep the existing behavior
         if inst == "guess":
             return f"{inst}_{item}" if item else inst or "measure"
+
+        # --- NEW: generic instrument labeling ---
+        # For anything else (e.g., epds_1, xyz_total_3)
+        if inst:
+            parts = [inst]
+            if sub:
+                parts.append(sub)
+            if item:
+                parts.append(item)
+            return "_".join(parts)
 
         return "measure"
 
     tidy["measure_label"] = tidy.apply(_label, axis=1).astype("string")
 
+    drop_these = []
     if drop_ids:
         drop_these = [c for c in tidy.columns if _is_participant_id(c)]
     if drop_these:
@@ -183,7 +206,11 @@ if __name__ == "__main__":
     norm = normalize_any(df)
 
     print("Preview of tidy data:")
-    with pd.option_context("display.max_rows", 30, "display.max_columns", 0, "display.width", 200):
+    with pd.option_context(
+        "display.max_rows", 30,
+        "display.max_columns", 0,
+        "display.width", 200
+    ):
         print(norm.head(30).to_string(index=False))
 
     p = Path(input_path)
